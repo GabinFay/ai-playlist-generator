@@ -1,6 +1,6 @@
 # ai-playlist-generator
-Generate your playlist from description  
-  
+Text to Spotify playlist
+
 Set your OPENAI_API_KEY environment variable
   
 Create an app on the Spotify developer platform : https://developer.spotify.com/  
