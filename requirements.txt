@@ -1,0 +1,8 @@
+matplotlib
+numpy
+openai
+Pillow
+Requests
+spotipy
+streamlit
+Unidecode
