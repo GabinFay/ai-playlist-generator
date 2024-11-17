@@ -5,6 +5,7 @@ from Util.MySpotify import MySpotify
 import requests
 import json
 
+
 SPOTIFY_CLIENT_ID = os.getenv('SPOTIFY_CLIENT_ID')
 SPOTIFY_CLIENT_SECRET = os.getenv('SPOTIFY_CLIENT_SECRET')
 SPOTIFY_REDIRECT_URI = os.getenv('SPOTIFY_REDIRECT_URI')
@@ -29,6 +30,89 @@ def exchange_code_for_token(code):
     response = requests.post(token_url, data=payload)
     return response.json()
 
+# Streamlit UI
+st.title("AI Playlist Creator")
+
+# Initialize session state variables
+if 'auth_flow_started' not in st.session_state:
+    st.session_state.auth_flow_started = False
+
+# Check for the authorization code
+print(st.query_params.to_dict())
+code = st.query_params.get('code')
+
+if 'spotify_token' not in st.session_state:
+    if code:
+        token_info = exchange_code_for_token(code)
+        st.session_state['spotify_token'] = token_info['access_token']
+    else:
+        # No code yet, continue the auth process
+        if not st.session_state.get('auth_flow_started', False):
+            auth_url = get_spotify_auth_url()
+            st.write("Please connect your Spotify account:")
+            if st.button("Connect Spotify"):
+                st.session_state.auth_flow_started = True
+                st.query_params['auth_flow_started'] = True
+                st.rerun()
+        else:
+            st.write("Redirecting to Spotify for authorization...")
+            st.markdown(f'<meta http-equiv="refresh" content="0;url={get_spotify_auth_url()}">', unsafe_allow_html=True)
+            st.stop()
+
+if 'spotify_token' in st.session_state:
+    if 'spotify_client' not in st.session_state:
+        with st.spinner("Connecting to Spotify... Should take 10/20 seconds"):
+            st.session_state.spotify_client = MySpotify(access_token=st.session_state['spotify_token'])
+            print('client created')
+
+    # Use the stored Spotify client
+    print('client known')
+    spo = st.session_state.spotify_client
+    print('client used')
+    print(st.session_state.get('step', 'Not set'))
+    # Initialize session state variables for flow control
+    if 'step' not in st.session_state:
+        st.session_state.step = 'enter_theme'
+
+    if st.session_state.step == 'enter_theme':
+        st.session_state.description = st.text_area(
+            "Enter a detailed description of the music you want to listen to:", 
+            max_chars=1000,
+            placeholder="Example: Electronic music that reminds of water, waves and nature"
+        )
+        if st.button("Generate Playlist"):
+            if st.session_state.description:
+                st.session_state.step = 'generate_playlist'
+
+    if st.session_state.step == 'generate_playlist':
+        st.subheader("Generating playlist...")
+        st.session_state.songs = generate_playlist(st.session_state.description)
+        st.session_state.formatted_songs = format_songs_list(st.session_state.songs)
+        st.session_state.track_uris, not_found = search_spotify_tracks(st.session_state.formatted_songs)
+        st.session_state.current_track_index = 0
+        st.session_state.step = 'play_music'
+
+    if st.session_state.step == 'play_music':
+        st.subheader("Now Playing")
+        if st.session_state.track_uris:
+            current_track = st.session_state.track_uris[st.session_state.current_track_index]
+            st.components.v1.iframe(f"https://open.spotify.com/embed/track/{current_track.split(':')[-1]}", height=80)
+
+            col1, col2, col3 = st.columns(3)
+            if col1.button("Previous") and st.session_state.current_track_index > 0:
+                st.session_state.current_track_index -= 1
+                st.rerun()
+            if col2.button("Next") and st.session_state.current_track_index < len(st.session_state.track_uris) - 1:
+                st.session_state.current_track_index += 1
+                st.rerun()
+            if col3.button("New Playlist"):
+                st.session_state.step = 'enter_theme'
+                st.rerun()
+
+        if not_found:
+            st.warning("Some songs were not found on Spotify:")
+            for song in not_found:
+                st.write(song)
 
 def generate_playlist(description):
     prompt = f"Create a playlist of 20 songs based on this description: '{description}'. Return only the song names and artists, one per line, without numbering or any other text. It is important that there is no numbering before each song. Format each song as 'Artist --- Song'"
@@ -172,109 +256,19 @@ def format_songs_list(songs):
 
     return response.choices[0].message.content.strip().split('\n')
 
-if __name__=='__main__':
-    # Streamlit UI
-    st.title("AI Playlist Creator")
+def search_spotify_tracks(songs):
+    all_results = []
+    not_found = []
 
-    # Initialize session state variables
-    if 'auth_flow_started' not in st.session_state:
-        st.session_state.auth_flow_started = False
-
-    # Check for the authorization code
-    print(st.query_params.to_dict())
-    code = st.query_params.get('code')
-
-    if 'spotify_token' not in st.session_state:
-        if code:
-            token_info = exchange_code_for_token(code)
-            st.session_state['spotify_token'] = token_info['access_token']
-        # st.experimental_set_query_params()  # Clear query params after fetching the code
-        # st.rerun()
+    for song in songs:
+        results = spo.search(song, type="track", market='FR', limit=5)['tracks']['items']
+        if results:
+            formatted_results = [f"{' '.join([artist['name'] for artist in track['artists']])} - {track['name']}" for track in results]
+            all_results.append((song, formatted_results, results))
         else:
-            # No code yet, continue the auth process
-            if not st.session_state.get('auth_flow_started', False):
-                auth_url = get_spotify_auth_url()
-                st.write("Please connect your Spotify account:")
-                if st.button("Connect Spotify"):
-                    st.session_state.auth_flow_started = True
-                    st.query_params['auth_flow_started'] = True
-                    st.rerun()
-            else:
-                st.write("Redirecting to Spotify for authorization...")
-                st.markdown(f'<meta http-equiv="refresh" content="0;url={get_spotify_auth_url()}">', unsafe_allow_html=True)
+            not_found.append(song)
 
-    if 'spotify_token' in st.session_state:
-        if 'spotify_client' not in st.session_state:
-            with st.spinner("Connecting to Spotify... Should take 10/20 seconds"):
-                st.session_state.spotify_client = MySpotify(access_token=st.session_state['spotify_token'])
-                print('client created')
+    # ... (keep existing LLM matching logic)
 
-        # Use the stored Spotify client
-        print('client known')
-        spo = st.session_state.spotify_client
-        print('client used')
-        print(st.session_state.get('step', 'Not set'))
-        # Initialize session state variables for flow control
-        if 'step' not in st.session_state:
-            st.session_state.step = 'enter_theme'
+    return [full_results[best_index]["uri"] for (_, _, full_results), best_index in zip(all_results, best_indices) if best_index != -1], not_found
 
-        if st.session_state.step == 'enter_theme':
-            st.session_state.description = st.text_area(
-                "Enter a detailed description for your playlist:", 
-                max_chars=1000,
-                placeholder="Example: Make a playlist of electronic music that reminds of water, waves and nature"
-            )
-            if st.button("Generate Playlist"):
-                if st.session_state.description:
-                    st.session_state.step = 'generate_playlist'
-
-        if st.session_state.step == 'generate_playlist':
-            st.subheader("Generating playlist...")
-            st.session_state.songs = generate_playlist(st.session_state.description)
-            st.session_state.step = 'display_playlist'
-
-        if st.session_state.step == 'display_playlist':
-            st.subheader("Generated Songs:")
-            for i, song in enumerate(st.session_state.songs):
-                col1, col2 = st.columns([0.9, 0.1])
-                col1.write(song)
-                if col2.button("➖", key=f"remove_{i}"):
-                    st.session_state.songs.pop(i)
-                    st.rerun()
-
-            refinement = st.text_input("Refine your playlist (e.g., 'Add more energetic tracks'):")
-            if st.button("Refine Playlist"):
-                st.session_state.songs = refine_playlist(st.session_state.description, "\n".join(st.session_state.songs), refinement)
-                st.rerun()
-
-            if st.button("Get Song Details"):
-                st.session_state.song_details = get_song_details(st.session_state.description, st.session_state.songs)
-                st.session_state.step = 'display_details'
-
-            st.session_state.playlist_name = st.text_input("Enter a name for your Spotify playlist:", value=f"{st.session_state.description[:30]}... Playlist")
-            if st.button("Create Spotify Playlist"):
-                # New LLM call to format the songs list
-                formatted_songs = format_songs_list(st.session_state.songs)
-                st.session_state.songs = formatted_songs
-                st.session_state.step = 'creating_playlist'
-
-        if st.session_state.step == 'display_details':
-            st.subheader("Song Details:")
-            for detail in st.session_state.song_details:
-                st.write(detail)
-            if st.button("Back to Playlist"):
-                st.session_state.step = 'display_playlist'
-
-        if st.session_state.step == 'creating_playlist':
-            st.subheader("Creating Spotify playlist...")
-            not_found = create_spotify_playlist(st.session_state.songs, st.session_state.playlist_name)
-            
-            st.success(f"Playlist '{st.session_state.playlist_name}' created successfully!")
-            
-            if not_found:
-                st.warning("Some songs were not found on Spotify:")
-                for song in not_found:
-                    st.write(song)
-            
-            if st.button("Create Another Playlist"):
-                st.session_state.step = 'enter_theme'
