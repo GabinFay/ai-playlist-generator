@@ -4,6 +4,8 @@ from openai import OpenAI
 from Util.MySpotify import MySpotify
 import requests
 import json
+import threading
+from streamlit.runtime.scriptrunner import add_script_run_ctx
 
 SPOTIFY_CLIENT_ID = os.getenv('SPOTIFY_CLIENT_ID')
 SPOTIFY_CLIENT_SECRET = os.getenv('SPOTIFY_CLIENT_SECRET')
@@ -81,6 +83,7 @@ def get_song_details(description, songs):
 
 def create_spotify_playlist(songs, playlist_name):
     pl_id = spo.find_pl_id(playlist_name, create_missing=True)
+    print(f"playlist url: https://open.spotify.com/playlist/{pl_id}")
 
     all_results = []
     not_found = []
@@ -115,13 +118,31 @@ def create_spotify_playlist(songs, playlist_name):
         ]
     )
 
-    try:
-        best_indices = [int(index.strip()) for index in response.choices[0].message.content.split(',')]
-        if len(best_indices) != len(all_results):
-            raise ValueError("Number of indices doesn't match number of queries")
-    except (ValueError, AttributeError) as e:
-        print(f"Error: Unable to parse LLM response. {str(e)}")
-        best_indices = [-1] * len(all_results)
+    while True:
+        try:
+            best_indices = [int(index.strip()) for index in response.choices[0].message.content.split(',')]
+            if len(best_indices) != len(all_results):
+                raise ValueError("Number of indices doesn't match number of queries")
+            break  # Exit the loop if no exception is raised
+        except ValueError as e:
+            if "Number of indices doesn't match number of queries" in str(e):
+                print(f"Retrying due to mismatch in number of indices... : {response.choices[0].message.content}")
+                # Retry logic: request a new response from the LLM
+                response = client.chat.completions.create(
+                    model="gpt-4o",
+                    messages=[
+                        {"role": "system", "content": "You are a music expert helping to match song queries with search results."},
+                        {"role": "user", "content": prompt}
+                    ]
+                )
+            else:
+                print(f"Error: Unable to parse LLM response. {str(e)}")
+                best_indices = [-1] * len(all_results)
+                break
+        except AttributeError as e:
+            print(f"Error: Unable to parse LLM response. {str(e)}")
+            best_indices = [-1] * len(all_results)
+            break
 
     # Process the LLM results and add tracks to the playlist
     for (original_query, _, full_results), best_index in zip(all_results, best_indices):
@@ -172,6 +193,11 @@ def format_songs_list(songs):
 
     return response.choices[0].message.content.strip().split('\n')
 
+def load_spotify_client():
+    with st.spinner("Connecting to Spotify... Should take 10/20 seconds"):
+        st.session_state.spotify_client = MySpotify(access_token=st.session_state['spotify_token'])
+        print('client created')
+
 if __name__=='__main__':
     # Streamlit UI
     st.title("AI Playlist Creator")
@@ -205,15 +231,21 @@ if __name__=='__main__':
 
     if 'spotify_token' in st.session_state:
         if 'spotify_client' not in st.session_state:
-            with st.spinner("Connecting to Spotify... Should take 10/20 seconds"):
-                st.session_state.spotify_client = MySpotify(access_token=st.session_state['spotify_token'])
-                print('client created')
+            # Create a thread for loading the Spotify client
+            client_thread = threading.Thread(target=load_spotify_client)
+            # Attach Streamlit's context to the thread
+            add_script_run_ctx(client_thread)
+            # Start the thread
+            client_thread.start()
+            st.session_state.step = 'enter_theme'  # Move to the next step immediately
 
         # Use the stored Spotify client
-        print('client known')
-        spo = st.session_state.spotify_client
-        print('client used')
-        print(st.session_state.get('step', 'Not set'))
+        if 'spotify_client' in st.session_state:
+            print('client known')
+            spo = st.session_state.spotify_client
+            print('client used')
+            print(st.session_state.get('step', 'Not set'))
+
         # Initialize session state variables for flow control
         if 'step' not in st.session_state:
             st.session_state.step = 'enter_theme'
