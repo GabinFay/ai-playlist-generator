@@ -42,8 +42,8 @@ def exchange_code_for_token(code):
     return response.json()
 
 
-def generate_playlist(description):
-    prompt = f"Create a playlist of 20 songs based on this description: '{description}'. Return a single word title for the playlist, starting with a capital letter, followed by the song names and artists, one per line, without numbering or any other text. It is important that there is no numbering before each song. Format each song as 'Artist --- Song'"
+def generate_playlist(description, num_tracks=20):
+    prompt = f"Create a playlist of {num_tracks} songs based on this description: '{description}'. The first word returned should be a single word title for the playlist, starting with a capital letter. Then, give the song names and artists, one per line, without numbering or any other text. It is important that there is no numbering before each song. Format each song as 'Artist --- Song'"
     
     messages = [
         {"role": "system", "content": "You are a music expert tasked with creating themed playlists."},
@@ -62,8 +62,8 @@ def generate_playlist(description):
 
     return title, songs
 
-def refine_playlist(description, current_playlist, refinement):
-    prompt = f"Based on the original description: '{description}', and the refinement request: '{refinement}', modify the following playlist:\n\n{current_playlist}\n\nProvide an updated list of 20 songs, one per line, without numbering or any other text. It is important that there is no numbering before each song. Format each song as 'Artist - Song'"
+def refine_playlist(description, current_playlist, refinement, removed_tracks):
+    prompt = f"Based on the original description: '{description}', and the refinement request: '{refinement}', modify the following playlist:\n\n{current_playlist}\n\nAvoid re-adding these removed tracks:\n\n{removed_tracks}\n\nProvide an updated list of songs, one per line, without numbering or any other text. It is important that there is no numbering before each song. Format each song as 'Artist - Song'"
     
     messages = [
         {"role": "system", "content": "You are a music expert tasked with refining playlists."},
@@ -217,6 +217,8 @@ if __name__=='__main__':
     # Initialize session state variables
     if 'auth_flow_started' not in st.session_state:
         st.session_state.auth_flow_started = False
+    if 'removed_tracks' not in st.session_state:
+        st.session_state.removed_tracks = []
 
     # Check for the authorization code
     print(st.query_params.to_dict())
@@ -272,45 +274,52 @@ if __name__=='__main__':
                 max_chars=1000,
                 placeholder="Example: Make a playlist of electronic music that reminds of water, waves and nature"
             )
+            st.session_state.num_tracks = st.number_input("Number of tracks:", min_value=1, max_value=100, value=20)
             if st.button("Generate Playlist"):
                 if st.session_state.description:
                     st.session_state.step = 'generate_playlist'
 
         if st.session_state.step == 'generate_playlist':
             st.subheader("Generating playlist...")
-            title, st.session_state.songs = generate_playlist(st.session_state.description)
+            title, st.session_state.songs = generate_playlist(st.session_state.description, st.session_state.num_tracks)
             st.session_state.playlist_name = title  # Set the default playlist name
             st.session_state.step = 'display_playlist'
 
         if st.session_state.step == 'display_playlist':
             st.subheader("Generated Songs:")
             for i, song in enumerate(st.session_state.songs):
-                col1, col2 = st.columns([0.9, 0.1])
+                col1, col2 = st.columns([0.7, 0.3])
                 col1.write(song)
                 if col2.button("➖", key=f"remove_{i}"):
-                    st.session_state.songs.pop(i)
+                    st.session_state.removed_tracks.append(st.session_state.songs.pop(i))
                     st.rerun()
 
             refinement = st.text_input("Refine your playlist (e.g., 'Add more energetic tracks'):")
             if st.button("Refine Playlist"):
-                st.session_state.songs = refine_playlist(st.session_state.description, "\n".join(st.session_state.songs), refinement)
+                st.session_state.songs = refine_playlist(
+                    st.session_state.description, 
+                    "\n".join(st.session_state.songs), 
+                    refinement,
+                    "\n".join(st.session_state.removed_tracks)
+                )
                 st.rerun()
 
-            if st.button("Get Song Details"):
+            if st.button("Add Details"):
                 st.session_state.song_details = get_song_details(st.session_state.description, st.session_state.songs)
                 st.session_state.step = 'display_details'
 
             st.session_state.playlist_name = st.text_input("Enter a name for your Spotify playlist:", value=st.session_state.playlist_name)
             if st.button("Create Spotify Playlist"):
-                # New LLM call to format the songs list
                 formatted_songs = format_songs_list(st.session_state.songs)
                 st.session_state.songs = formatted_songs
                 st.session_state.step = 'creating_playlist'
 
         if st.session_state.step == 'display_details':
             st.subheader("Song Details:")
-            for detail in st.session_state.song_details:
-                st.write(detail)
+            for song, detail in zip(st.session_state.songs, st.session_state.song_details):
+                col1, col2 = st.columns([0.5, 0.5])
+                col1.write(song)
+                col2.write(detail)
             if st.button("Back to Playlist"):
                 st.session_state.step = 'display_playlist'
 
