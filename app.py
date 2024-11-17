@@ -1,4 +1,10 @@
 import streamlit as st
+
+st.set_page_config(
+    # page_title="AI Playlist Creator",  # Title of the page
+    page_icon="favicon2.ico"  # Path to your favicon
+)
+
 import os
 from openai import OpenAI
 from Util.MySpotify import MySpotify
@@ -15,6 +21,10 @@ SPOTIFY_SCOPE = os.getenv('SPOTIFY_SCOPE')
 # Initialize OpenAI client
 client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 
+# Display the logo
+st.image("logo.jpg", width=200)  # Adjust the width as needed
+
+# Your app's title and other component
 def get_spotify_auth_url():
     auth_url = f"https://accounts.spotify.com/authorize?client_id={SPOTIFY_CLIENT_ID}&response_type=code&redirect_uri={SPOTIFY_REDIRECT_URI}&scope={SPOTIFY_SCOPE}"
     return auth_url
@@ -33,7 +43,7 @@ def exchange_code_for_token(code):
 
 
 def generate_playlist(description):
-    prompt = f"Create a playlist of 20 songs based on this description: '{description}'. Return only the song names and artists, one per line, without numbering or any other text. It is important that there is no numbering before each song. Format each song as 'Artist --- Song'"
+    prompt = f"Create a playlist of 20 songs based on this description: '{description}'. Return a single word title for the playlist, starting with a capital letter, followed by the song names and artists, one per line, without numbering or any other text. It is important that there is no numbering before each song. Format each song as 'Artist --- Song'"
     
     messages = [
         {"role": "system", "content": "You are a music expert tasked with creating themed playlists."},
@@ -46,9 +56,11 @@ def generate_playlist(description):
     )
 
     # Split the content into lines and filter out empty lines
-    songs = [song.strip() for song in response.choices[0].message.content.strip().split('\n') if song.strip()]
+    lines = [line.strip() for line in response.choices[0].message.content.strip().split('\n') if line.strip()]
+    title = lines[0]  # The first line is the title
+    songs = lines[1:]  # The rest are the songs
 
-    return songs
+    return title, songs
 
 def refine_playlist(description, current_playlist, refinement):
     prompt = f"Based on the original description: '{description}', and the refinement request: '{refinement}', modify the following playlist:\n\n{current_playlist}\n\nProvide an updated list of 20 songs, one per line, without numbering or any other text. It is important that there is no numbering before each song. Format each song as 'Artist - Song'"
@@ -153,7 +165,7 @@ def create_spotify_playlist(songs, playlist_name):
         else:
             not_found.append(original_query)
 
-    return not_found
+    return not_found, pl_id
 
 def format_songs_list(songs):
     system_prompt = """You are a music expert tasked with formatting song information consistently."""
@@ -194,9 +206,9 @@ def format_songs_list(songs):
     return response.choices[0].message.content.strip().split('\n')
 
 def load_spotify_client():
-    with st.spinner("Connecting to Spotify... Should take 10/20 seconds"):
-        st.session_state.spotify_client = MySpotify(access_token=st.session_state['spotify_token'])
-        print('client created')
+    # with st.spinner("Connecting to Spotify... Should take 10/20 seconds"):
+    st.session_state.spotify_client = MySpotify(access_token=st.session_state['spotify_token'])
+    print('client created')
 
 if __name__=='__main__':
     # Streamlit UI
@@ -231,13 +243,17 @@ if __name__=='__main__':
 
     if 'spotify_token' in st.session_state:
         if 'spotify_client' not in st.session_state:
-            # Create a thread for loading the Spotify client
-            client_thread = threading.Thread(target=load_spotify_client)
-            # Attach Streamlit's context to the thread
-            add_script_run_ctx(client_thread)
-            # Start the thread
-            client_thread.start()
-            st.session_state.step = 'enter_theme'  # Move to the next step immediately
+            if not st.session_state.get('client_thread_started', False):
+                # Create a thread for loading the Spotify client
+                client_thread = threading.Thread(target=load_spotify_client)
+                # Attach Streamlit's context to the thread
+                add_script_run_ctx(client_thread)
+                # Start the thread
+                client_thread.start()
+                st.session_state.client_thread_started = True  # Mark the thread as started
+                st.session_state.step = 'enter_theme'  # Move to the next step immediately
+
+
 
         # Use the stored Spotify client
         if 'spotify_client' in st.session_state:
@@ -262,7 +278,8 @@ if __name__=='__main__':
 
         if st.session_state.step == 'generate_playlist':
             st.subheader("Generating playlist...")
-            st.session_state.songs = generate_playlist(st.session_state.description)
+            title, st.session_state.songs = generate_playlist(st.session_state.description)
+            st.session_state.playlist_name = title  # Set the default playlist name
             st.session_state.step = 'display_playlist'
 
         if st.session_state.step == 'display_playlist':
@@ -283,7 +300,7 @@ if __name__=='__main__':
                 st.session_state.song_details = get_song_details(st.session_state.description, st.session_state.songs)
                 st.session_state.step = 'display_details'
 
-            st.session_state.playlist_name = st.text_input("Enter a name for your Spotify playlist:", value=f"{st.session_state.description[:30]}... Playlist")
+            st.session_state.playlist_name = st.text_input("Enter a name for your Spotify playlist:", value=st.session_state.playlist_name)
             if st.button("Create Spotify Playlist"):
                 # New LLM call to format the songs list
                 formatted_songs = format_songs_list(st.session_state.songs)
@@ -298,10 +315,21 @@ if __name__=='__main__':
                 st.session_state.step = 'display_playlist'
 
         if st.session_state.step == 'creating_playlist':
+            # Wait for the Spotify client to be available
+            while 'spotify_client' not in st.session_state:
+                st.write("Waiting for Spotify client to be ready...")
+                st.rerun()
             st.subheader("Creating Spotify playlist...")
-            not_found = create_spotify_playlist(st.session_state.songs, st.session_state.playlist_name)
+            not_found, pl_id = create_spotify_playlist(st.session_state.songs, st.session_state.playlist_name)
             
             st.success(f"Playlist '{st.session_state.playlist_name}' created successfully!")
+            
+            # Add a button to view the playlist on Spotify
+            playlist_url = f"https://open.spotify.com/playlist/{pl_id}"
+            st.markdown(f"[Open Playlist]({playlist_url})", unsafe_allow_html=True)
+            
+            # Update the step to prevent re-creation
+            st.session_state.step = 'playlist_created'
             
             if not_found:
                 st.warning("Some songs were not found on Spotify:")
