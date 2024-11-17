@@ -10,4 +10,4 @@ COPY Util /app/Util
 
 EXPOSE 8080
 
-CMD ["streamlit", "run", "ai_playlist_generator.py", "--server.port=8080", "--server.address=0.0.0.0"]
+CMD ["streamlit", "run", "app.py", "--server.port=8080", "--server.address=0.0.0.0"]
