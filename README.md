@@ -1,4 +1,4 @@
-# ai-playlist-generator
+# ai-playlist-generator : https://ai-playlist-generator-lingering-darkness-7867.fly.dev/
 Text to Spotify playlist
 
 Set your OPENAI_API_KEY environment variable
