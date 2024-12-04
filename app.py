@@ -2,7 +2,7 @@ import streamlit as st
 
 st.set_page_config(
     # page_title="AI Playlist Creator",  # Title of the page
-    page_icon="favicon2.ico"  # Path to your favicon
+    page_icon="static/favicon2.ico"  # Path to your favicon
 )
 
 import os
@@ -22,7 +22,7 @@ SPOTIFY_SCOPE = os.getenv('SPOTIFY_SCOPE')
 client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 
 # Display the logo
-st.image("logo.jpg", width=200)  # Adjust the width as needed
+st.image("static/logo.jpg", width=200)  # Adjust the width as needed
 
 # Your app's title and other component
 def get_spotify_auth_url():

@@ -5,8 +5,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY ai_playlist_generator.py .
+COPY app.py .
 COPY Util /app/Util
+COPY static /app/static
 
 EXPOSE 8080
 
