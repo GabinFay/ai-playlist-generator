@@ -12,7 +12,7 @@ import random
 import datetime
 
 class MySpotify(spotipy.Spotify):
-    def __init__(self, client_id=None, client_secret=None, redirect_uri=None, scope=None, access_token=None):
+    def __init__(self, client_id=None, client_secret=None, redirect_uri=None, scope=None, access_token=None, skip_user_playlists=False):
         if access_token:
             # Initialize with user-provided access token
             super().__init__(auth=access_token)
@@ -21,8 +21,21 @@ class MySpotify(spotipy.Spotify):
             self.auth_manager = self.oauth2_manager(client_id, client_secret, redirect_uri, scope)
             super().__init__(auth_manager=self.auth_manager)
         
-        self.user_id = self.me()['id'] if '#' not in self.me()['id'] else self.me()['id'].replace('#','%23',1)
-        self.pl_ids, self.pl_names = self.get_user_playlist_names_and_ids()
+        # Skip loading user playlists if requested (useful for quick searches)
+        if not skip_user_playlists:
+            try:
+                self.user_id = self.me()['id'] if '#' not in self.me()['id'] else self.me()['id'].replace('#','%23',1)
+                self.pl_ids, self.pl_names = self.get_user_playlist_names_and_ids()
+            except Exception as e:
+                print(f"Warning: Could not load user playlists: {str(e)}")
+                self.user_id = None
+                self.pl_ids = []
+                self.pl_names = []
+        else:
+            self.user_id = None
+            self.pl_ids = []
+            self.pl_names = []
+            
         self.fish_emoji = '\ud83d\udc1f'.encode('utf-16', 'surrogatepass').decode('utf-16')
     
     

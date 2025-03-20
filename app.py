@@ -4,14 +4,17 @@ st.set_page_config(
     # page_title="AI Playlist Creator",  # Title of the page
     page_icon="static/favicon2.ico"  # Path to your favicon
 )
-
 import os
+from dotenv import load_dotenv
 from openai import OpenAI
 from Util.MySpotify import MySpotify
 import requests
 import json
 import threading
 from streamlit.runtime.scriptrunner import add_script_run_ctx
+
+# Load environment variables from .env file
+load_dotenv()
 
 SPOTIFY_CLIENT_ID = os.getenv('SPOTIFY_CLIENT_ID')
 SPOTIFY_CLIENT_SECRET = os.getenv('SPOTIFY_CLIENT_SECRET')
